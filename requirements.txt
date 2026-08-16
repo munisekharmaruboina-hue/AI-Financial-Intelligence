@@ -1,0 +1,28 @@
+# Backend / API
+fastapi
+uvicorn
+
+# Frontend
+streamlit
+plotly
+
+# Agent orchestration
+langgraph
+langchain-core
+langchain-community
+langchain-text-splitters
+
+# LLM
+groq
+
+# Market data
+yfinance
+pandas
+numpy
+
+# RAG / embeddings / HTTP calls
+requests
+
+# Config
+python-dotenv
+pydantic
