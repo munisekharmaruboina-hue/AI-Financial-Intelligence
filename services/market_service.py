@@ -31,7 +31,6 @@ KNOWN_TICKERS = {
 def _fetch_sync(ticker: str) -> dict:
     stock = yf.Ticker(ticker)
     hist = stock.history(period="3mo")
-    print(f"[DEBUG] Ticker: {ticker}, rows fetched: {len(hist)}")
 
     history = [
         {"date": str(idx.date()), "close": round(row["Close"], 2)}
@@ -123,4 +122,3 @@ def _resolve_ticker_sync(query: str, exchange: str = "NSE") -> str:
 async def resolve_ticker(query: str, exchange: str = "NSE") -> str:
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, _resolve_ticker_sync, query, exchange)
-
