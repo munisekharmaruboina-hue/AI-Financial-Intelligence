@@ -1,4 +1,5 @@
 import asyncio
+import math
 import time
 import requests
 import yfinance as yf
@@ -27,6 +28,40 @@ KNOWN_TICKERS = {
 }
 
 
+def _clean_float(val):
+    """Returns None for NaN/invalid floats, since JSON cannot serialize NaN."""
+    if val is None:
+        return None
+    try:
+        f = float(val)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(f) or math.isinf(f):
+        return None
+    return f
+
+
+def _fetch_info_with_retry(stock: yf.Ticker, ticker: str, max_retries: int = 3) -> dict:
+    for attempt in range(1, max_retries + 1):
+        try:
+            info = stock.info
+            if info and (info.get("currentPrice") is not None or info.get("marketCap") is not None):
+                print(f"[DEBUG] .info succeeded for {ticker} on attempt {attempt}")
+                return {
+                    "current_price": _clean_float(info.get("currentPrice")),
+                    "market_cap": _clean_float(info.get("marketCap")),
+                    "pe_ratio": _clean_float(info.get("trailingPE")),
+                }
+            raise ValueError("Empty or incomplete info returned")
+        except Exception as e:
+            print(f"[DEBUG] .info attempt {attempt} failed for {ticker}: {e}")
+            if attempt < max_retries:
+                time.sleep(1.0 * attempt)
+
+    print(f"[DEBUG] All .info attempts failed for {ticker}, falling back to history-derived price")
+    return {"current_price": None, "market_cap": None, "pe_ratio": None}
+
+
 def _fetch_sync(ticker: str, max_retries: int = 3) -> dict:
     last_error = None
 
@@ -40,30 +75,32 @@ def _fetch_sync(ticker: str, max_retries: int = 3) -> dict:
 
             print(f"[DEBUG] Ticker: {ticker}, attempt {attempt}, rows fetched: {len(hist)}")
 
-            history = [
-                {"date": str(idx.date()), "close": round(row["Close"], 2)}
-                for idx, row in hist.iterrows()
-            ]
+            history = []
+            skipped = 0
+            for idx, row in hist.iterrows():
+                close_val = _clean_float(row["Close"])
+                if close_val is None:
+                    skipped += 1
+                    continue
+                history.append({"date": str(idx.date()), "close": round(close_val, 2)})
 
-            current_price = None
-            market_cap = None
-            pe_ratio = None
-            try:
-                info = stock.info
-                current_price = info.get("currentPrice")
-                market_cap = info.get("marketCap")
-                pe_ratio = info.get("trailingPE")
-            except Exception as e:
-                print(f"[DEBUG] .info fetch failed for {ticker}: {e}")
+            if skipped:
+                print(f"[DEBUG] Skipped {skipped} row(s) with invalid/NaN close price for {ticker}")
 
+            if not history:
+                raise ValueError("All rows had invalid close prices")
+
+            info_data = _fetch_info_with_retry(stock, ticker)
+
+            current_price = info_data["current_price"]
             if current_price is None and history:
                 current_price = history[-1]["close"]
 
             return {
                 "history": history,
                 "current_price": current_price,
-                "market_cap": market_cap,
-                "pe_ratio": pe_ratio,
+                "market_cap": info_data["market_cap"],
+                "pe_ratio": info_data["pe_ratio"],
             }
 
         except Exception as e:
