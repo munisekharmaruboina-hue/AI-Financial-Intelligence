@@ -1,10 +1,9 @@
 import asyncio
+import time
 import requests
 import yfinance as yf
 import difflib
 
-# Known company name -> ticker mappings, checked first before any API search.
-# Add more entries here as you demo different companies.
 KNOWN_TICKERS = {
     "mrf": "MRF.NS",
     "tcs": "TCS.NS",
@@ -28,23 +27,53 @@ KNOWN_TICKERS = {
 }
 
 
-def _fetch_sync(ticker: str) -> dict:
-    stock = yf.Ticker(ticker)
-    hist = stock.history(period="3mo")
+def _fetch_sync(ticker: str, max_retries: int = 3) -> dict:
+    last_error = None
 
-    history = [
-        {"date": str(idx.date()), "close": round(row["Close"], 2)}
-        for idx, row in hist.iterrows()
-    ]
+    for attempt in range(1, max_retries + 1):
+        try:
+            stock = yf.Ticker(ticker)
+            hist = stock.history(period="3mo")
 
-    info = stock.info
+            if hist is None or hist.empty:
+                raise ValueError("Empty history returned")
 
-    return {
-        "history": history,
-        "current_price": info.get("currentPrice"),
-        "market_cap": info.get("marketCap"),
-        "pe_ratio": info.get("trailingPE"),
-    }
+            print(f"[DEBUG] Ticker: {ticker}, attempt {attempt}, rows fetched: {len(hist)}")
+
+            history = [
+                {"date": str(idx.date()), "close": round(row["Close"], 2)}
+                for idx, row in hist.iterrows()
+            ]
+
+            current_price = None
+            market_cap = None
+            pe_ratio = None
+            try:
+                info = stock.info
+                current_price = info.get("currentPrice")
+                market_cap = info.get("marketCap")
+                pe_ratio = info.get("trailingPE")
+            except Exception as e:
+                print(f"[DEBUG] .info fetch failed for {ticker}: {e}")
+
+            if current_price is None and history:
+                current_price = history[-1]["close"]
+
+            return {
+                "history": history,
+                "current_price": current_price,
+                "market_cap": market_cap,
+                "pe_ratio": pe_ratio,
+            }
+
+        except Exception as e:
+            last_error = e
+            print(f"[DEBUG] Attempt {attempt} failed for {ticker}: {e}")
+            if attempt < max_retries:
+                time.sleep(1.5 * attempt)
+
+    print(f"[DEBUG] All {max_retries} attempts failed for {ticker}. Last error: {last_error}")
+    return {"history": [], "current_price": None, "market_cap": None, "pe_ratio": None}
 
 
 async def get_market_data(ticker: str) -> dict:
@@ -55,23 +84,19 @@ async def get_market_data(ticker: str) -> dict:
 def _resolve_ticker_sync(query: str, exchange: str = "NSE") -> str:
     query_clean = query.strip().lower()
 
-    # 1. Check the known-tickers lookup table first — fastest and most reliable
     if query_clean in KNOWN_TICKERS:
         return KNOWN_TICKERS[query_clean]
 
-    # 1b. Catch typos (e.g. "nividia" -> "nvidia") via fuzzy matching
     close_matches = difflib.get_close_matches(query_clean, KNOWN_TICKERS.keys(), n=1, cutoff=0.75)
     if close_matches:
         return KNOWN_TICKERS[close_matches[0]]
 
     query_upper = query.strip().upper()
 
-    # 2. If it already looks like a valid ticker, verify it directly with yfinance
     if len(query_upper) <= 12 and ("." in query_upper or " " not in query_upper):
         suffix_map = {"NSE": ".NS", "BSE": ".BO", "NASDAQ": ""}
         suffix = suffix_map.get(exchange, "")
 
-        # Try the exchange-specific version first (e.g. INFY -> INFY.NS for NSE)
         if suffix and not query_upper.endswith(suffix):
             candidate = f"{query_upper}{suffix}"
             try:
@@ -81,7 +106,6 @@ def _resolve_ticker_sync(query: str, exchange: str = "NSE") -> str:
             except Exception:
                 pass
 
-        # Fall back to the bare ticker as typed
         try:
             test = yf.Ticker(query_upper)
             if test.history(period="5d").shape[0] > 0:
@@ -89,7 +113,6 @@ def _resolve_ticker_sync(query: str, exchange: str = "NSE") -> str:
         except Exception:
             pass
 
-    # 3. Fall back to Yahoo Finance's search, filtered to equities only
     try:
         url = "https://query1.finance.yahoo.com/v1/finance/search"
         params = {"q": query, "quotesCount": 10, "newsCount": 0}
