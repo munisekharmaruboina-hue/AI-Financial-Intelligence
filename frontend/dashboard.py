@@ -81,7 +81,7 @@ exchange = st.sidebar.selectbox("Exchange", ["NSE", "BSE", "NASDAQ"])
 raw_ticker = st.sidebar.text_input("Stock symbol or company name", "TCS")
 analyze = st.sidebar.button("Analyze", use_container_width=True)
 
-API_URL = "http://127.0.0.1:8000/analyze"
+API_URL = "https://ai-financial-intelligence.onrender.com/analyze"
 
 # ------------------------------------
 # Helpers
