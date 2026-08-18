@@ -1,9 +1,15 @@
 import asyncio
 import math
+import os
 import time
 import requests
 import yfinance as yf
 import difflib
+from dotenv import load_dotenv
+
+load_dotenv()
+
+ALPHA_VANTAGE_API_KEY = os.getenv("ALPHA_VANTAGE_API_KEY")
 
 KNOWN_TICKERS = {
     "mrf": "MRF.NS",
@@ -41,6 +47,45 @@ def _clean_float(val):
     return f
 
 
+def _fetch_alpha_vantage_overview(ticker: str) -> dict:
+    """
+    Fallback for market cap / P-E ratio when Yahoo's .info fails.
+    Alpha Vantage expects bare US-style symbols; strips exchange suffixes
+    like .NS / .BO since AV's free tier has limited non-US coverage.
+    """
+    if not ALPHA_VANTAGE_API_KEY:
+        print("[DEBUG] No ALPHA_VANTAGE_API_KEY set, skipping fallback")
+        return {"current_price": None, "market_cap": None, "pe_ratio": None}
+
+    symbol = ticker.split(".")[0]
+
+    try:
+        url = "https://www.alphavantage.co/query"
+        params = {
+            "function": "OVERVIEW",
+            "symbol": symbol,
+            "apikey": ALPHA_VANTAGE_API_KEY,
+        }
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+
+        if not data or "MarketCapitalization" not in data:
+            print(f"[DEBUG] Alpha Vantage returned no overview data for {symbol}: {data}")
+            return {"current_price": None, "market_cap": None, "pe_ratio": None}
+
+        print(f"[DEBUG] Alpha Vantage overview succeeded for {symbol}")
+        return {
+            "current_price": None,  # AV's OVERVIEW doesn't include live price
+            "market_cap": _clean_float(data.get("MarketCapitalization")),
+            "pe_ratio": _clean_float(data.get("PERatio")),
+        }
+
+    except Exception as e:
+        print(f"[DEBUG] Alpha Vantage fallback failed for {symbol}: {e}")
+        return {"current_price": None, "market_cap": None, "pe_ratio": None}
+
+
 def _fetch_info_with_retry(stock: yf.Ticker, ticker: str, max_retries: int = 3) -> dict:
     for attempt in range(1, max_retries + 1):
         try:
@@ -58,8 +103,9 @@ def _fetch_info_with_retry(stock: yf.Ticker, ticker: str, max_retries: int = 3) 
             if attempt < max_retries:
                 time.sleep(1.0 * attempt)
 
-    print(f"[DEBUG] All .info attempts failed for {ticker}, falling back to history-derived price")
-    return {"current_price": None, "market_cap": None, "pe_ratio": None}
+    print(f"[DEBUG] All .info attempts failed for {ticker}, trying Alpha Vantage fallback")
+    av_data = _fetch_alpha_vantage_overview(ticker)
+    return av_data
 
 
 def _fetch_sync(ticker: str, max_retries: int = 3) -> dict:
