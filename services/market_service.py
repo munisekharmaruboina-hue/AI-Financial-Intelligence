@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 ALPHA_VANTAGE_API_KEY = os.getenv("ALPHA_VANTAGE_API_KEY")
+FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY")
 
 KNOWN_TICKERS = {
     "mrf": "MRF.NS",
@@ -47,36 +48,76 @@ def _clean_float(val):
     return f
 
 
-def _fetch_alpha_vantage_overview(ticker: str) -> dict:
+def _fetch_finnhub_overview(ticker: str) -> dict:
     """
-    Fallback for market cap / P-E ratio when Yahoo's .info fails.
-    Alpha Vantage expects bare US-style symbols; strips exchange suffixes
-    like .NS / .BO since AV's free tier has limited non-US coverage.
+    Primary fallback for market cap / P-E ratio. Finnhub's free tier
+    (60 req/min) is far more generous than Alpha Vantage's (25/day),
+    so it's much less likely to be exhausted by shared-IP hosting.
+    Strips exchange suffixes since Finnhub's free tier is US-focused.
     """
-    if not ALPHA_VANTAGE_API_KEY:
-        print("[DEBUG] No ALPHA_VANTAGE_API_KEY set, skipping fallback")
+    if not FINNHUB_API_KEY:
+        print("[DEBUG] No FINNHUB_API_KEY set, skipping Finnhub fallback")
         return {"current_price": None, "market_cap": None, "pe_ratio": None}
 
     symbol = ticker.split(".")[0]
 
     try:
-        url = "https://www.alphavantage.co/query"
-        params = {
-            "function": "OVERVIEW",
-            "symbol": symbol,
-            "apikey": ALPHA_VANTAGE_API_KEY,
-        }
-        response = requests.get(url, params=params, timeout=10)
+        profile_resp = requests.get(
+            "https://finnhub.io/api/v1/stock/profile2",
+            params={"symbol": symbol, "token": FINNHUB_API_KEY},
+            timeout=10,
+        )
+        profile_resp.raise_for_status()
+        profile = profile_resp.json()
+
+        metric_resp = requests.get(
+            "https://finnhub.io/api/v1/stock/metric",
+            params={"symbol": symbol, "metric": "all", "token": FINNHUB_API_KEY},
+            timeout=10,
+        )
+        metric_resp.raise_for_status()
+        metrics = metric_resp.json().get("metric", {})
+
+        market_cap = profile.get("marketCapitalization")
+        # Finnhub returns market cap in millions
+        market_cap = _clean_float(market_cap) * 1_000_000 if market_cap else None
+        pe_ratio = _clean_float(metrics.get("peTTM") or metrics.get("peBasicExclExtraTTM"))
+
+        if market_cap is None and pe_ratio is None:
+            print(f"[DEBUG] Finnhub returned no usable data for {symbol}")
+            return {"current_price": None, "market_cap": None, "pe_ratio": None}
+
+        print(f"[DEBUG] Finnhub overview succeeded for {symbol}")
+        return {"current_price": None, "market_cap": market_cap, "pe_ratio": pe_ratio}
+
+    except Exception as e:
+        print(f"[DEBUG] Finnhub fallback failed for {symbol}: {e}")
+        return {"current_price": None, "market_cap": None, "pe_ratio": None}
+
+
+def _fetch_alpha_vantage_overview(ticker: str) -> dict:
+    """Secondary fallback if Finnhub also fails to provide data."""
+    if not ALPHA_VANTAGE_API_KEY:
+        return {"current_price": None, "market_cap": None, "pe_ratio": None}
+
+    symbol = ticker.split(".")[0]
+
+    try:
+        response = requests.get(
+            "https://www.alphavantage.co/query",
+            params={"function": "OVERVIEW", "symbol": symbol, "apikey": ALPHA_VANTAGE_API_KEY},
+            timeout=10,
+        )
         response.raise_for_status()
         data = response.json()
 
         if not data or "MarketCapitalization" not in data:
-            print(f"[DEBUG] Alpha Vantage returned no overview data for {symbol}: {data}")
+            print(f"[DEBUG] Alpha Vantage returned no overview data for {symbol}")
             return {"current_price": None, "market_cap": None, "pe_ratio": None}
 
         print(f"[DEBUG] Alpha Vantage overview succeeded for {symbol}")
         return {
-            "current_price": None,  # AV's OVERVIEW doesn't include live price
+            "current_price": None,
             "market_cap": _clean_float(data.get("MarketCapitalization")),
             "pe_ratio": _clean_float(data.get("PERatio")),
         }
@@ -103,9 +144,14 @@ def _fetch_info_with_retry(stock: yf.Ticker, ticker: str, max_retries: int = 3) 
             if attempt < max_retries:
                 time.sleep(1.0 * attempt)
 
-    print(f"[DEBUG] All .info attempts failed for {ticker}, trying Alpha Vantage fallback")
-    av_data = _fetch_alpha_vantage_overview(ticker)
-    return av_data
+    print(f"[DEBUG] All .info attempts failed for {ticker}, trying Finnhub fallback")
+    finnhub_data = _fetch_finnhub_overview(ticker)
+
+    if finnhub_data["market_cap"] is not None or finnhub_data["pe_ratio"] is not None:
+        return finnhub_data
+
+    print(f"[DEBUG] Finnhub had no data for {ticker}, trying Alpha Vantage fallback")
+    return _fetch_alpha_vantage_overview(ticker)
 
 
 def _fetch_sync(ticker: str, max_retries: int = 3) -> dict:
