@@ -7,7 +7,6 @@ import plotly.graph_objects as go
 # ------------------------------------
 st.set_page_config(
     page_title="AI Financial Intelligence",
-    page_icon="📈",
     layout="wide"
 )
 
@@ -68,7 +67,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("📈 AI Financial Intelligence")
+st.title("AI Financial Intelligence")
 st.markdown("##### Multi-Agent Stock Analysis Platform")
 st.divider()
 
@@ -78,8 +77,12 @@ st.divider()
 st.sidebar.title("Settings")
 
 exchange = st.sidebar.selectbox("Exchange", ["NSE", "BSE", "NASDAQ"])
-raw_ticker = st.sidebar.text_input("Stock symbol or company name", "TCS")
+raw_ticker = st.sidebar.text_input("Stock symbol or company name", "")
 analyze = st.sidebar.button("Analyze", use_container_width=True)
+
+if analyze and not raw_ticker.strip():
+    st.sidebar.warning("Please enter a stock symbol or company name.")
+    analyze = False
 
 API_URL = "https://ai-financial-intelligence.onrender.com/analyze"
 
@@ -212,7 +215,7 @@ if analyze:
 
     with col1:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown('<div class="section-title">📈 Technical analysis</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">Technical analysis</div>', unsafe_allow_html=True)
         if technical.get("error"):
             st.write(technical["error"])
         else:
@@ -222,7 +225,7 @@ if analyze:
         st.markdown('</div>', unsafe_allow_html=True)
 
     with col2:
-        st.markdown('<div class="section-title">📚 Research summary</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">Research summary</div>', unsafe_allow_html=True)
         sources = research.get("sources_used", 0)
         if sources > 0:
             st.write(research.get("summary", ""))
@@ -235,18 +238,18 @@ if analyze:
     # Advisor recommendation
     # --------------------------------
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">🧠 AI recommendation</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">AI recommendation</div>', unsafe_allow_html=True)
     st.write(rec_text if rec_text else "No recommendation available.")
     key_risk = advisor.get("key_risk")
     if key_risk:
-        st.markdown(f'<div class="risk-box">⚠️ Key risk: {key_risk}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="risk-box">Key risk: {key_risk}</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
     # --------------------------------
     # Final report
     # --------------------------------
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">📝 Final report</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Final report</div>', unsafe_allow_html=True)
     report_text = report.get("final", "No report available") if isinstance(report, dict) else str(report)
     st.markdown(report_text)
     st.markdown('</div>', unsafe_allow_html=True)
@@ -255,4 +258,4 @@ if analyze:
         st.json(history)
 
 else:
-    st.info("Enter a stock symbol or company name in the sidebar and click **Analyze** to get started.")
+    st.info("Enter a stock symbol or company name in the sidebar and click Analyze to get started.")
