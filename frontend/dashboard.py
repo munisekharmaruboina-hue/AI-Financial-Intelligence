@@ -260,6 +260,7 @@ if analyze:
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.markdown('<div class="section-title">Final report</div>', unsafe_allow_html=True)
     report_text = report.get("final", "No report available") if isinstance(report, dict) else str(report)
+    report_text = report_text.replace("$", "\\$")
     st.markdown(report_text)
     st.markdown('</div>', unsafe_allow_html=True)
 
