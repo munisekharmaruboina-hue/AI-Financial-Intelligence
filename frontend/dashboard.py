@@ -89,14 +89,23 @@ API_URL = "https://ai-financial-intelligence.onrender.com/analyze"
 # ------------------------------------
 # Helpers
 # ------------------------------------
-def fmt_currency(val, symbol="₹"):
+def fmt_currency(val, exchange="NSE"):
     if val is None:
         return "—"
-    if val >= 1e12:
-        return f"{symbol}{val/1e12:.2f}T"
-    if val >= 1e7:
-        return f"{symbol}{val/1e7:.2f}Cr"
-    return f"{symbol}{val:,.2f}"
+    if exchange == "NASDAQ":
+        symbol = "$"
+        if val >= 1e12:
+            return f"{symbol}{val/1e12:.2f}T"
+        if val >= 1e9:
+            return f"{symbol}{val/1e9:.2f}B"
+        return f"{symbol}{val:,.2f}"
+    else:
+        symbol = "₹"
+        if val >= 1e12:
+            return f"{symbol}{val/1e12:.2f}T"
+        if val >= 1e7:
+            return f"{symbol}{val/1e7:.2f}Cr"
+        return f"{symbol}{val:,.2f}"
 
 
 def badge_class(rec_text: str) -> str:
@@ -172,9 +181,9 @@ if analyze:
     # --------------------------------
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        metric_card("Current price", fmt_currency(market.get("current_price")))
+        metric_card("Current price", fmt_currency(market.get("current_price"), exchange))
     with c2:
-        metric_card("Market cap", fmt_currency(market.get("market_cap")))
+        metric_card("Market cap", fmt_currency(market.get("market_cap"), exchange))
     with c3:
         pe = market.get("pe_ratio")
         metric_card("P/E ratio", f"{pe:.2f}" if pe else "—")
